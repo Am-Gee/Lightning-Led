@@ -507,7 +507,7 @@ void CLightController::Update()
     }
     else
     {
-        if((m_LightingMode == CLOUDS || m_LightingMode == MOSTLY_CLOUDS || m_LightingMode == PARTLY_CLOUDY) && curMillis - m_lLastCloudImageMillis >= m_lCloudImageDuration)
+        if((m_LightingMode == CLOUDS || m_LightingMode == SCATTERED_CLOUDS || m_LightingMode == MOSTLY_CLOUDS || m_LightingMode == PARTLY_CLOUDY) && curMillis - m_lLastCloudImageMillis >= m_lCloudImageDuration)
         {
             UpdateClouds();
             m_lLastCloudImageMillis = millis();
