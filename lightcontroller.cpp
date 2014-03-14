@@ -7,6 +7,7 @@
 #include "onewire.h"
 #include "fancontroller.h"
 #include "lightcontroller.h"
+#include "daytimewatch.h"
 
 #define WIDTH 5
 #define HEIGHT 3
@@ -38,6 +39,7 @@
 #define SUNRISE_MINUTE 41
 #define SUNSET_HOUR 42
 #define SUNSET_MINUTE 43
+
 
 #define MASTER_CONNECT 100
 #define MASTER_PING 101
@@ -114,19 +116,14 @@ CLightController::CLightController(OneWire* pDS, SoftPwm* pSoftPwm, Communicator
 {
     m_iNightWatchDogCounter = 0;
 
+    m_bSleepModeRequested = true;
+
     m_bRemoteDataRequested = true; // on first start we request data from raspberry pi
 
     m_pCommunicator = pCom;
 
     m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
 
-    m_iSunriseHour = 13;
-    m_iSunriseMinute = 10;
-    m_iSunsetHour = 23;
-    m_iSunsetMinute = 0;
-
-    m_iNightHour = 23;
-    m_iNightMinute = 1;
 
     m_iCloudOctaves = 2;
     m_lCloudImageDuration = 0L;
@@ -240,8 +237,6 @@ void CLightController::WriteConfiguration()
 
 void CLightController::Setup()
 {
-
-
     for(int y = 0; y < HEIGHT; y++)
     {
         for(int x = 0; x < WIDTH; x++)
@@ -260,6 +255,14 @@ void CLightController::Setup()
     m_Timer.SetTime(23, 1, 0);
     m_Timer.PrintTime();
 #endif
+
+    Serial.println("dayime watch setup...");
+
+    Time sunrise(12, 30);
+
+    Time sunset(23,30);
+
+    m_DayTimeWatch.setup(sunrise, sunset, m_iSunSetSunRiseTime / 60);
 
 // USE_SIM_TIMER
     randomSeed(analogRead(0));
@@ -320,60 +323,10 @@ void CLightController::EnsureNightTime()
 {
     bool nightTime = false;
 
-    int hour = m_Timer.GetHour();
-    int minute = m_Timer.GetMinute();
+    Time currentTime(m_Timer.GetHour(), m_Timer.GetMinute());
+    DayTimeWatch::DayTime daytime = m_DayTimeWatch.watch(currentTime);
 
-    if(m_iNightHour <= m_iSunriseHour) // night hour after midnight
-    {
-        //Serial.println("night hour after midnight");
-
-        // check before or after midnight
-        bool beforeMidnight = true;
-        if(hour >= 0 && hour <= m_iSunriseHour) // current hour after midnight
-        {
-            //Serial.println("current hour after midnight");
-            if(hour == m_iNightHour && minute > m_iNightMinute)
-            {
-                //Serial.println("NT #1");
-                nightTime = true;
-            }
-            else if(hour > m_iNightHour && hour < m_iSunriseHour)
-            {
-                //Serial.println("NT #2");
-                nightTime = true;
-            }
-            else if(hour == m_iSunriseHour && minute < m_iSunriseMinute)
-            {
-                //Serial.println("NT #3");
-                nightTime = true;
-            }
-
-        }
-       /* else
-        {
-            Serial.println("current hour before midnight");
-        }*/
-    }
-    else // night time before midnight
-    {
-        //Serial.println("night time before midnight");
-
-        if(hour >= m_iNightHour)
-        {
-            if(hour == m_iNightHour && minute > m_iNightMinute)
-            {
-                //Serial.println("NT #1.1");
-                nightTime = true;
-            }
-            else if(hour > m_iNightHour)
-            {
-                //Serial.println("NT #1.2");
-                nightTime = true;
-            }
-        }
-    }
-
-    if(nightTime)
+    if(daytime == DayTimeWatch::DT_NIGHT)
     {
         bool forceNight;
 
@@ -399,9 +352,11 @@ void CLightController::SetSunset(byte hour, byte minute)
     char buf[32];
     sprintf(buf, "LC: sunset: %02d:%02d", hour, minute);
     Serial.println(buf);
-    m_iSunsetHour = hour;
-    m_iSunsetMinute = minute;
-    CalculateNightTime();
+
+    m_DayTimeWatch.setSunset(hour, minute);
+
+    m_DayTimeWatch.calculateNightTimeStart();
+
 }
 
 void CLightController::SetSunrise(byte hour, byte minute)
@@ -409,8 +364,10 @@ void CLightController::SetSunrise(byte hour, byte minute)
     char buf[32];
     sprintf(buf, "LC: sunrise: %02d:%02d", hour, minute);
     Serial.println(buf);
-    m_iSunriseHour = hour;
-    m_iSunriseMinute = minute;
+    m_DayTimeWatch.setSunrise(hour, minute);
+
+    m_DayTimeWatch.calculateNightTimeStart();
+
 }
 
 void CLightController::SetMoon(long fadeTime)
@@ -585,8 +542,14 @@ void CLightController::Update()
                     Serial.println( m_Timer.GetDayOfMonth() );
 
                     m_bRemoteDataRequested = false;
+
+                    m_bAllowWeatherChange = true;
+
                     m_iCurrentDayOfMonth = m_Timer.GetDayOfMonth();
                 }
+
+                Time currentTime(m_Timer.GetHour(), m_Timer.GetMinute());
+                DayTimeWatch::DayTime dayTime = m_DayTimeWatch.watch(currentTime);
 
                 switch(m_LightingMode)
                 {
@@ -599,23 +562,110 @@ void CLightController::Update()
                     {
                         bool startSunrise = false;
 
+                        m_bAllowWeatherChange = false;
+
                         m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
 
-                        if(!m_bRemoteDataRequested && m_Timer.GetHour() == m_iSunriseHour - 1)
+                        if(!m_bSleepModeRequested)
                         {
+                            Serial.println("requesting sleep mode...");
+                            m_pCommunicator->RequestSleepMode();
+                            m_bSleepModeRequested = true;
+                        }
+                        if(!m_bRemoteDataRequested && m_Timer.GetHour() == m_DayTimeWatch.GetSunriseHour() - 1)
+                        {
+                            // enable data receive...
+
                             Serial.println("requesting remote lighting data...");
                             m_pCommunicator->RequestRemoteConnection();
                             m_bRemoteDataRequested = true;
+
                         }
-                        if(m_Timer.GetHour() == m_iSunriseHour && m_Timer.GetMinute() == m_iSunriseMinute)
+
+
+                        switch(dayTime)
                         {
-                            startSunrise = true;
+                        case DayTimeWatch::DT_SUNRISE:
+                            {
+                                Serial.println("LC: DT_SUNRISE");
+
+                                m_bAllowWeatherChange = true;
+
+                                m_Timer.PrintTime();
+
+                                SetLightingMode(SUNRISE);
+
+                                m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
+
+                            }
+                            break;
+                        case DayTimeWatch::DT_SUNRISE_OT:
+                            {
+                                Serial.println("LC: DT_SUNRISE_OT");
+
+                                m_bAllowWeatherChange = true;
+
+                                m_Timer.PrintTime();
+
+                                int sunriseMinutes = SUNSET_SUNRISE_TIME / 60;
+
+                                int minutesOver = m_DayTimeWatch.getOverTime();
+
+                                if(minutesOver > sunriseMinutes)
+                                {
+                                     m_iSunSetSunRiseTime = 30; // 30 seconds
+                                }
+                                else
+                                {
+                                    m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
+                                }
+
+                                SetLightingMode(SUNRISE);
+
+                                m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
+                            }
+                            break;
+                        case DayTimeWatch::DT_DAY:
+                            {
+                                Serial.println("LC: DT_DAY");
+                                m_bAllowWeatherChange = true;
+
+                                Serial.println("LC: fast sunrise.");
+
+                                m_iSunSetSunRiseTime = 30;
+
+                                SetLightingMode(SUNRISE);
+
+                                m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
+                            }
+                            break;
                         }
-                        else if(m_Timer.GetHour() == m_iSunriseHour && m_Timer.GetMinute() > m_iSunriseMinute)
+
+                    }
+                    break;
+                default:
+                    {
+                        if(dayTime == DayTimeWatch::DT_SUNSET)
                         {
-                            int minutesOver = m_Timer.GetMinute() - m_iSunriseMinute;
+                            Serial.println("LC: DT_SUNSET");
+
+                            m_bAllowWeatherChange = false;
+                            m_bSleepModeRequested = false;
+
+                            m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
+                            SetLightingMode(SUNSET);
+                            m_TargetLightingMode = NIGHT;
+                        }
+                        else if(dayTime == DayTimeWatch::DT_SUNSET_OT)
+                        {
+                            Serial.println("LC: DT_SUNSET_OT");
+
+                            m_bAllowWeatherChange = false;
+                            m_bSleepModeRequested = false;
 
                             int sunriseMinutes = SUNSET_SUNRISE_TIME / 60;
+
+                            int minutesOver = m_DayTimeWatch.getOverTime();
 
                             if(minutesOver > sunriseMinutes)
                             {
@@ -626,36 +676,15 @@ void CLightController::Update()
                                 m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
                             }
 
-                            startSunrise = true;
-                        }
-                        else if(m_Timer.GetHour() > m_iSunriseHour && (m_Timer.GetHour() < m_iSunsetHour || (m_Timer.GetHour() <= 23 && m_iSunsetHour < m_iSunriseHour)))
-                        {
-                            Serial.println("LC: fast sunrise.");
+                            if(minutesOver > sunriseMinutes)
+                            {
 
-                            m_iSunSetSunRiseTime = 30;
-                            startSunrise = true;
-                        }
-                        else if(m_Timer.GetHour() == m_iSunsetHour && m_Timer.GetMinute() < m_iSunsetMinute)
-                        {
-                            Serial.println("LC: fast sunrise, shortly before sunset, or Timer problem.");
-                            m_iSunSetSunRiseTime = 30;
-                            startSunrise = true;
-                        }
-                        if(startSunrise)
-                        {
-                            m_Timer.PrintTime();
-
-                            SetLightingMode(SUNRISE);
-                            m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
-                        }
-
-                    }
-                    break;
-                default:
-                    {
-                        if(m_Timer.GetHour() == m_iSunsetHour && m_Timer.GetMinute() >= m_iSunsetMinute)
-                        {
-                            m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
+                                 m_iSunSetSunRiseTime = 30; // 30 seconds
+                            }
+                            else
+                            {
+                                m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
+                            }
                             SetLightingMode(SUNSET);
                             m_TargetLightingMode = NIGHT;
                         }
@@ -1081,39 +1110,92 @@ long CLightController::Execute(int method, int params, char* pfParamArr[10], boo
 
 float CLightController::GetValue(int value)
 {
-    if(value == LIGHTINGMODE)
+    switch(value)
     {
-        return (byte)m_LightingMode;
+    case LIGHTINGMODE:
+        {
+            return (byte)m_LightingMode;
+        }
+        break;
+    case MOONLIGHTVAL:
+        {
+            return m_fMoonLightValue;
+        }
+        break;
+    case MOONLIGHTPIN:
+        {
+            return m_iMoonLightPin;
+        }
+        break;
+    case VALUE_WATCHDOG_COUNTER:
+        {
+            return m_iNightWatchDogCounter;
+        }
+        break;
+    case CLOUD_SPEED:
+        {
+            return m_lCloudImageDuration;
+        }
+        break;
+    case SUNRISE_HOUR:
+        {
+            return m_DayTimeWatch.GetSunriseHour();
+        }
+        break;
+    case SUNRISE_MINUTE:
+        {
+            return m_DayTimeWatch.GetSunriseMinute();
+        }
+        break;
+    case SUNSET_HOUR:
+        {
+            return m_DayTimeWatch.GetSunsetHour();
+        }
+        break;
+    case SUNSET_MINUTE:
+        {
+            return m_DayTimeWatch.GetSunsetMinute();
+        }
+        break;
+    default:
+        {
+            Serial.print("LC: gv unknown value: ");
+            Serial.println(value);
+        }
+        break;
     }
-    else if(value == MOONLIGHTVAL)
-    {
-        return m_fMoonLightValue;
-    }
-    else if(value == MOONLIGHTPIN)
-    {
-        return m_iMoonLightPin;
-    }
-    else if(value == VALUE_WATCHDOG_COUNTER)
-    {
-        return m_iNightWatchDogCounter;
-    }
+
     return -1.0f;
 }
 
 void CLightController::SetValue(int value, float fValue)
 {
+    //Serial.print("LC: SetValue(");
+    //Serial.print(value);
+    //Serial.print(",");
+    //Serial.println(fValue);
+
     switch(value)
     {
+    case VALUE_WATCHDOG_COUNTER:
+        {
+            m_iNightWatchDogCounter = 0;
+        }
+        break;
     case LIGHTINGMODE:
         {
             if(m_controllerMode == STANDALONE)
             {
-                if(m_LightingMode == NIGHT || m_LightingMode == SUNRISE)
+                if(m_LightingMode == NIGHT || m_LightingMode == SUNRISE && m_bAllowWeatherChange)
                 {
                     SetValue(TARGETLIGHTINGMODEAFTERSUNRISE, fValue);
                     return;
                 }
-
+                else if(m_LightingMode == SUNSET)
+                {
+                    Serial.println("new lighting mode ignored, because sunset.");
+                    return;
+                }
             }
             SetLightingMode((LightingMode)fValue);
             m_TargetLightingMode = (LightingMode)fValue;
@@ -1158,6 +1240,12 @@ void CLightController::SetValue(int value, float fValue)
         break;
     case CLOUD_SPEED:
         {
+            if(m_controllerMode == STANDALONE && !m_bAllowWeatherChange)
+            {
+                Serial.println("LC: weather change disabled.");
+                return;
+            }
+
             if(m_LightingMode == SUNRISE || m_LightingMode == SUNSET || m_LightingMode == NIGHT)
             {
                 Serial.println("LC: wind ignored.");
@@ -1206,6 +1294,11 @@ void CLightController::SetValue(int value, float fValue)
         break;
     case CREATE_NEW_CLOUD_IMAGE:
         {
+            if(m_controllerMode == STANDALONE && !m_bAllowWeatherChange)
+            {
+                Serial.println("LC: weather change disabled.");
+                return;
+            }
             CreateCloudImages();
         }
         break;
@@ -1217,6 +1310,7 @@ void CLightController::SetValue(int value, float fValue)
                 Serial.println("master connected.");
                 m_TargetLightingMode = NIGHT;
                 SetLightingMode(NIGHT);
+                m_bAllowWeatherChange = true;
                 m_controllerMode = REMOTE_CONTROLLED;
             }
             else
@@ -1228,109 +1322,42 @@ void CLightController::SetValue(int value, float fValue)
         break;
     case SUNRISE_HOUR:
         {
-            m_iSunriseHour = (byte)fValue;
+            m_DayTimeWatch.setSunriseHour((byte)fValue);
             Serial.print("LC: Sunrise hour: ");
-            Serial.println(m_iSunriseHour);
+            Serial.println((byte)fValue);
         }
         break;
     case SUNRISE_MINUTE:
         {
-            m_iSunriseMinute = (byte)fValue;
+            m_DayTimeWatch.setSunriseMinute((byte)fValue);
+            m_DayTimeWatch.calculateNightTimeStart();
             Serial.print("LC: Sunrise minute: ");
-            Serial.println(m_iSunriseMinute);
+            Serial.println((byte)fValue);
         }
         break;
     case SUNSET_HOUR:
         {
-            m_iSunsetHour = (byte)fValue;
-            if(m_iSunsetHour == 24) m_iSunsetHour == 0;
-            CalculateNightTime();
+            m_DayTimeWatch.setSunsetHour((byte)fValue);
             Serial.print("LC: Sunset hour: ");
-            Serial.println(m_iSunsetHour);
+            Serial.println((byte)fValue);
         }
         break;
     case SUNSET_MINUTE:
         {
-            m_iSunsetMinute = (byte)fValue;
-            CalculateNightTime();
+            m_DayTimeWatch.setSunsetMinute((byte)fValue);
+            m_DayTimeWatch.calculateNightTimeStart();
+
             Serial.print("LC: Sunset minute: ");
-            Serial.println(m_iSunsetMinute);
+            Serial.println((byte)fValue);
         }
         break;
     default:
         {
             Serial.print("LC: sv unknown: ");
-            Serial.println(fValue);
+            Serial.println(value);
         }
         break;
     }
-
-}
-
-void CLightController::CalculateNightTime()
-{
-
-    m_iNightHour = m_iSunsetHour;
-    m_iNightMinute = m_iSunsetMinute + 1;
-
-//    Serial.print("before night hour: ");
-//    Serial.println(m_iNightHour);
-
-//    Serial.print("before night minute: ");
-//    Serial.println(m_iNightMinute);
-    if(m_iNightMinute == 60)
-    {
-        m_iNightMinute = 0;
-
-        m_iNightHour++;
-
-        if(m_iNightHour == 24)
-        {
-            m_iNightHour = 0;
-        }
-    }
-
-    int sunsetMinutes = SUNSET_SUNRISE_TIME / 60;
-
-
-    int hours = 0;
-    int minutes = sunsetMinutes;
-
-    if(sunsetMinutes >= 60)
-    {
-        hours = sunsetMinutes % 60;
-        minutes = sunsetMinutes - (hours * 60);
-    }
-
- //   Serial.print("hours: ");
- //   Serial.println(hours);
-
- //   Serial.print("minutes: ");
- //   Serial.println(minutes);
-
-    m_iNightHour += hours;
-    if(m_iNightHour >= 24)
-    {
-        m_iNightHour = m_iNightHour - 24;
-    }
-
-    m_iNightMinute += minutes;
-    if(m_iNightMinute >= 60)
-    {
-        m_iNightMinute = m_iNightMinute - 60;
-
-        m_iNightHour++;
-
-        if(m_iNightHour == 24)
-        {
-            m_iNightHour = 0;
-        }
-    }
-
-    Serial.print("night time: ");
-    Serial.print(m_iNightHour);
-    Serial.print(" : ");
-    Serial.println(m_iNightMinute);
 }
 
 void CLightController::SetPixel(float* pBuffer, byte x, byte y, float val)

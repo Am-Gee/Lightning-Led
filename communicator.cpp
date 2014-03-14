@@ -17,6 +17,7 @@
 Communicator::Communicator()
 {
     m_bConnectRequested = false;
+    m_bSleepRequested = true;
     m_bRemoteControllerActive = false;
     m_iRequestingDevice = SERIAL_PORT0;
     m_CurrentMode = READ;
@@ -136,6 +137,13 @@ void Communicator::RequestRemoteConnection()
     m_lTestMillis = millis();
 }
 
+void Communicator::RequestSleepMode()
+{
+    m_bSleepRequested = false;
+    m_lTestMillis = millis();
+}
+
+
 void Communicator::Update()
 {
     if(m_CurrentMode == WRITE)
@@ -159,6 +167,17 @@ void Communicator::Update()
             WriteString(SERIAL_PORT1, "CC:CONNECT");
 
             m_bConnectRequested = true;
+
+            return;
+        }
+
+        if(!m_bSleepRequested && millis() - m_lTestMillis > REMOTE_CONTROLLER_PING_INTERVAL)
+        {
+            m_lTestMillis = millis();
+
+            WriteString(SERIAL_PORT1, "CC:SLEEP");
+
+            m_bSleepRequested = true;
 
             return;
         }

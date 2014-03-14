@@ -43,6 +43,7 @@ class Communicator : public CModule, Executor
         inline int ReadCommandData(IO_Device currentIODevice) { return (currentIODevice == SERIAL_PORT0) ? Serial.read() : Serial1.read();}
 
         void RequestRemoteConnection();
+        void RequestSleepMode();
 
     protected:
         void WriteString(IO_Device dev, const char* szVal);
@@ -67,6 +68,7 @@ class Communicator : public CModule, Executor
         long m_lSessionID;
         bool m_bRemoteControllerActive;
         bool m_bConnectRequested;
+        bool m_bSleepRequested;
         Mode m_CurrentMode;
 
         char m_CommandLine[MAX_CMD_LEN];

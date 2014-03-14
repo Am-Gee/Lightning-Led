@@ -436,7 +436,7 @@
 	"timer.h"
 	"csimulatedclock.h"
 
-1393072235 source:c:\codeblocks\projects\lightning_led\lightcontroller.cpp
+1393623814 source:c:\codeblocks\projects\lightning_led\lightcontroller.cpp
 	<Arduino.h>
 	<EEProm.h>
 	"digitalwritefast.h"
@@ -444,6 +444,7 @@
 	"onewire.h"
 	"fancontroller.h"
 	"lightcontroller.h"
+	"daytimewatch.h"
 
 1392828159 c:\codeblocks\projects\lightning_led\fancontroller.h
 	"executor.h"
@@ -451,7 +452,7 @@
 	"onewiretempsensor.h"
 	"csensor.h"
 
-1393071683 c:\codeblocks\projects\lightning_led\lightcontroller.h
+1393618021 c:\codeblocks\projects\lightning_led\lightcontroller.h
 	"defines.h"
 	"executor.h"
 	"timer.h"
@@ -459,6 +460,7 @@
 	"perlinnoise.h"
 	"communicator.h"
 	"csimulatedclock.h"
+	"daytimewatch.h"
 
 1392832509 source:c:\codeblocks\projects\lightning_led\fancontroller.cpp
 	<Arduino.h>
@@ -485,7 +487,7 @@
 	<stdarg.h>
 	"cmodule.h"
 
-1393072275 source:c:\codeblocks\projects\lightning_led\timer.cpp
+1393072987 source:c:\codeblocks\projects\lightning_led\timer.cpp
 	<arduino.h>
 	<stdarg.h>
 	<Wire.h>
@@ -547,13 +549,13 @@
 	<arduino.h>
 	"perlinnoise.h"
 
-1392828310 source:c:\codeblocks\projects\lightning_led\communicator.cpp
+1393618472 source:c:\codeblocks\projects\lightning_led\communicator.cpp
 	<Arduino.h>
 	"string.h"
 	"cmodule.h"
 	"communicator.h"
 
-1392828159 c:\codeblocks\projects\lightning_led\communicator.h
+1393618309 c:\codeblocks\projects\lightning_led\communicator.h
 	"executor.h"
 
 1388842498 source:c:\codeblocks\projects\lightning_led\executor.cpp
@@ -586,4 +588,10 @@
 	"simplexnoise.h"
 
 1392737761 c:\codeblocks\projects\lightning_led\simplexnoise.h
+
+1393620547 source:c:\codeblocks\projects\lightning_led\daytimewatch.cpp
+	<Arduino.h>
+	"daytimewatch.h"
+
+1393623207 c:\codeblocks\projects\lightning_led\daytimewatch.h
 

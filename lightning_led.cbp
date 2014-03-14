@@ -653,6 +653,8 @@
 		<Compiler>
 			<Add directory="." />
 		</Compiler>
+		<Unit filename="DayTimeWatch.cpp" />
+		<Unit filename="DayTimeWatch.h" />
 		<Unit filename="cmodule.cpp" />
 		<Unit filename="cmodule.h" />
 		<Unit filename="communicator.cpp" />

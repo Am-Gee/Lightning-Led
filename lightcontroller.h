@@ -7,6 +7,7 @@
 #include "perlinnoise.h"
 #include "communicator.h"
 #include "csimulatedclock.h"
+#include "daytimewatch.h"
 
 #define _USE_SIM_TIMER
 
@@ -104,7 +105,7 @@ class CLightController : public Executor
         void UpdateDemo();
         void UpdateClouds();
         void CreateCloudImages();
-        void CalculateNightTime();
+
         void UpdateCloudAnimationParams(long speed);
         void EnsureNightTime();
 
@@ -124,6 +125,9 @@ class CLightController : public Executor
         LightingMode m_TargetLightingModeAfterSunrise;
 
         bool m_bRemoteDataRequested;
+        bool m_bSleepModeRequested;
+        bool m_bAllowWeatherChange;
+
         bool m_bDrawBuffer;
         unsigned long m_lLastMillis;
         unsigned long m_lLastCloudImageMillis;
@@ -143,18 +147,13 @@ class CLightController : public Executor
 
         byte m_iNightWatchDogCounter;
 
-        byte m_iSunriseHour;
-        byte m_iSunriseMinute;
-        byte m_iSunsetHour;
-        byte m_iSunsetMinute;
-
-        byte m_iNightHour;
-        byte m_iNightMinute;
-
         byte m_PixelX;
         byte m_PixelY;
 
+        DayTimeWatch m_DayTimeWatch;
+
         int m_iSunSetSunRiseTime;
+
         long m_lCloudImageDuration;
         byte m_iMoonLightPin;
         float m_fMoonLightValue;
