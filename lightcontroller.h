@@ -24,40 +24,34 @@ struct DimChannel
 };
 
 
-enum LightEffect
-{
-    FADE = 0,
-    IMMEDIATE = 1
-};
-
-enum LightingMode
-{
-   NIGHT, // 0
-   SUNRISE, // 1
-   SUNSET, // 2
-   CLEAR, // 3
-   CLOUDS, // 4
-   PARTLY_CLOUDY, // 5
-   MOSTLY_CLOUDS, // 6
-   DEMO
-};
-
-enum ControllerState
-{
-    OFF,
-    HANDSHAKE,
-    RUNNING
-};
-
-enum ControllerMode
-{
-    REMOTE_CONTROLLED,
-    STANDALONE
-};
-
 class CLightController : public Executor
 {
     public:
+
+        enum LightEffect
+        {
+            FADE = 0,
+            IMMEDIATE = 1
+        };
+
+        enum LightingMode
+        {
+           NIGHT, // 0
+           SUNRISE, // 1
+           SUNSET, // 2
+           CLEAR, // 3
+           CLOUDS, // 4
+           PARTLY_CLOUDY, // 5
+           MOSTLY_CLOUDS, // 6
+           SCATTERED_CLOUDS, // 7
+           DEMO // 8
+        };
+
+        enum ControllerProgram
+        {
+            MANUAL,
+            AUTOMATIC
+        };
 
         CLightController(OneWire* pDS, SoftPwm* pSoftPwm, Communicator* pCom);
         virtual ~CLightController();
@@ -112,6 +106,7 @@ class CLightController : public Executor
         void SetPixel(float* pBuffer, byte x, byte y, float fVal);
 
         void SetMoon(long fadeTime);
+        void SetBluePixelBrightnes(float fBrightnessForBluePixels);
 
         //Configuration m_Configuration;
 
@@ -141,11 +136,13 @@ class CLightController : public Executor
         float m_fCloudParamZoom;
         float m_fCloudParamP;
 
-        byte m_iCloudOctaves;
-
-        byte m_iCurrentDayOfMonth;
+        //byte m_iCloudOctaves;
 
         byte m_iNightWatchDogCounter;
+
+        byte m_iMaxFullSunCellsPercent;
+        byte m_iMaxValueMostlyClouds;
+        byte m_iMaxValueClouds;
 
         byte m_PixelX;
         byte m_PixelY;
@@ -158,8 +155,9 @@ class CLightController : public Executor
         byte m_iMoonLightPin;
         float m_fMoonLightValue;
         LightEffect m_currentEffect;
-        ControllerMode m_controllerMode;
-        ControllerState m_controllerState;
+
+        ControllerProgram m_controllerMode;
+
         byte m_ScrollY;
 
 #ifndef USE_SIM_TIMER

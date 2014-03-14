@@ -436,10 +436,9 @@
 	"timer.h"
 	"csimulatedclock.h"
 
-1393623814 source:c:\codeblocks\projects\lightning_led\lightcontroller.cpp
+1394715797 source:c:\codeblocks\projects\lightning_led\lightcontroller.cpp
 	<Arduino.h>
 	<EEProm.h>
-	"digitalwritefast.h"
 	"timer.h"
 	"onewire.h"
 	"fancontroller.h"
@@ -452,7 +451,7 @@
 	"onewiretempsensor.h"
 	"csensor.h"
 
-1393618021 c:\codeblocks\projects\lightning_led\lightcontroller.h
+1394712050 c:\codeblocks\projects\lightning_led\lightcontroller.h
 	"defines.h"
 	"executor.h"
 	"timer.h"
@@ -462,7 +461,7 @@
 	"csimulatedclock.h"
 	"daytimewatch.h"
 
-1392832509 source:c:\codeblocks\projects\lightning_led\fancontroller.cpp
+1394711750 source:c:\codeblocks\projects\lightning_led\fancontroller.cpp
 	<Arduino.h>
 	<stdarg.h>
 	"onewire.h"
@@ -487,7 +486,7 @@
 	<stdarg.h>
 	"cmodule.h"
 
-1393072987 source:c:\codeblocks\projects\lightning_led\timer.cpp
+1394711671 source:c:\codeblocks\projects\lightning_led\timer.cpp
 	<arduino.h>
 	<stdarg.h>
 	<Wire.h>

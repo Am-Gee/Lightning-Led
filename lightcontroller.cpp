@@ -1,8 +1,6 @@
 #include <Arduino.h>
 #include <EEProm.h>
 
-#include "digitalwritefast.h"
-
 #include "timer.h"
 #include "onewire.h"
 #include "fancontroller.h"
@@ -34,6 +32,9 @@
 #define CLOUD_SPEED             23
 //#define CLOUD_IMAGE_BRIGHTNESS  24
 #define CLOUD_IMAGE_OCTAVES     24
+#define MAX_VALUE_MOSTLY_CLOUDS 25
+#define MAX_VALUE_CLOUDY        26
+#define MAX_VALUE_FULLSUNCELLS  27
 
 #define SUNRISE_HOUR 40
 #define SUNRISE_MINUTE 41
@@ -114,6 +115,10 @@ float cloudImage1[CLOUD_IMAGE_HEIGHT * WIDTH];
 
 CLightController::CLightController(OneWire* pDS, SoftPwm* pSoftPwm, Communicator* pCom)
 {
+    m_iMaxFullSunCellsPercent = 45;
+    m_iMaxValueMostlyClouds = 155;
+    m_iMaxValueClouds = 200;
+
     m_iNightWatchDogCounter = 0;
 
     m_bSleepModeRequested = true;
@@ -125,15 +130,14 @@ CLightController::CLightController(OneWire* pDS, SoftPwm* pSoftPwm, Communicator
     m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
 
 
-    m_iCloudOctaves = 2;
     m_lCloudImageDuration = 0L;
 
     m_fCloudParamZoom = 0.3f;
     m_fCloudParamP = 0.5f;
 
-    m_controllerMode = STANDALONE;
+    m_controllerMode = AUTOMATIC;
 
-    m_iMoonLightPin = 8;
+    m_iMoonLightPin = 11;
 
     m_fMoonLightValue = 0.0f;
 
@@ -152,8 +156,6 @@ CLightController::CLightController(OneWire* pDS, SoftPwm* pSoftPwm, Communicator
 //    m_Configuration.nGroupConfigs = 0;
 //    m_Configuration.pGroupConfigs = NULL;
     m_bDrawBuffer = false;
-
-    m_controllerState = OFF;
 
 }
 
@@ -290,15 +292,6 @@ void CLightController::Setup()
         WriteConfiguration();
     }
 */
-
-
-
-
-    m_iCurrentDayOfMonth = m_Timer.GetDayOfMonth();
-
-    Serial.print("day: ");
-    Serial.println(m_iCurrentDayOfMonth);
-
     SetEffectMode(IMMEDIATE);
 
     m_LightingMode = NIGHT;
@@ -314,8 +307,9 @@ void CLightController::Setup()
     m_lLastMillis = millis();
     m_lLastUpdateMillis = millis();
     m_lLastCloudImageMillis = 0L;
-    m_controllerState = RUNNING;
 
+    Serial.println("requesting remote connection....");
+    m_pCommunicator->RequestRemoteConnection();
     Serial.println("LC: set up.");
 }
 
@@ -460,6 +454,13 @@ void CLightController::SetLightingMode(LightingMode mode)
             CreateCloudImages();
         }
         break;
+    case SCATTERED_CLOUDS:
+        {
+            Serial.println("SCATTERED CLOUDS");
+
+            CreateCloudImages();
+        }
+        break;
     case DEMO:
         {
             Serial.print("DEMO");
@@ -487,181 +488,115 @@ void CLightController::Update()
 {
     unsigned long curMillis = millis();
 
-    if(m_controllerState == RUNNING)
+
+    if(m_currentEffect == FADE)
     {
-        if(m_currentEffect == FADE)
+        if(curMillis - m_lLastMillis >= INTERVAL)
         {
-            if(curMillis - m_lLastMillis >= INTERVAL)
+            m_lLastMillis = curMillis;
+            m_lEffectCounter++;
+            if(m_lEffectCounter > m_lMaxEffectSteps)
             {
-                m_lLastMillis = curMillis;
-                m_lEffectCounter++;
-                if(m_lEffectCounter > m_lMaxEffectSteps)
-                {
-                    SetEffectMode(IMMEDIATE);
-                }
-                else
-                {
-                    RenderBuffer();
-                }
+                SetEffectMode(IMMEDIATE);
+            }
+            else
+            {
+                RenderBuffer();
             }
         }
-        else
+    }
+    else
+    {
+        if((m_LightingMode == CLOUDS || m_LightingMode == MOSTLY_CLOUDS || m_LightingMode == PARTLY_CLOUDY) && curMillis - m_lLastCloudImageMillis >= m_lCloudImageDuration)
         {
-            if((m_LightingMode == CLOUDS || m_LightingMode == MOSTLY_CLOUDS || m_LightingMode == PARTLY_CLOUDY) && curMillis - m_lLastCloudImageMillis >= m_lCloudImageDuration)
+            UpdateClouds();
+            m_lLastCloudImageMillis = millis();
+        }
+
+        if(curMillis - m_lLastUpdateMillis >= UPDATE_IMAGE)
+        {
+            bool modeSwitched = false;
+            if(m_LightingMode != DEMO)
             {
-                UpdateClouds();
-                m_lLastCloudImageMillis = millis();
+                if(m_LightingMode != m_TargetLightingMode)
+                {
+                    Serial.print("Target lighting mode reached: ");
+                    Serial.println(m_TargetLightingMode);
+                    SetLightingMode(m_TargetLightingMode);
+
+                    m_LightingMode = m_TargetLightingMode;
+
+                    modeSwitched = true;
+
+                }
+
+                EnsureNightTime();
+
+
             }
 
-            if(curMillis - m_lLastUpdateMillis >= UPDATE_IMAGE)
+            Time currentTime(m_Timer.GetHour(), m_Timer.GetMinute());
+            DayTimeWatch::DayTime dayTime = m_DayTimeWatch.watch(currentTime);
+
+            switch(m_LightingMode)
             {
-
-                bool modeSwitched = false;
-                if(m_LightingMode != DEMO)
+            case DEMO:
                 {
-                    if(m_LightingMode != m_TargetLightingMode)
-                    {
-                        Serial.print("Target lighting mode reached: ");
-                        Serial.println(m_TargetLightingMode);
-                        SetLightingMode(m_TargetLightingMode);
-
-                        m_LightingMode = m_TargetLightingMode;
-
-                        modeSwitched = true;
-
-                    }
-
-                    EnsureNightTime();
-
-
+                    UpdateDemo();
                 }
-
-                if(m_Timer.GetDayOfMonth() != m_iCurrentDayOfMonth)
+                break;
+            case NIGHT:
                 {
-                    Serial.print("LC: next day: ");
-                    Serial.println( m_Timer.GetDayOfMonth() );
-
-                    m_bRemoteDataRequested = false;
-
-                    m_bAllowWeatherChange = true;
-
-                    m_iCurrentDayOfMonth = m_Timer.GetDayOfMonth();
-                }
-
-                Time currentTime(m_Timer.GetHour(), m_Timer.GetMinute());
-                DayTimeWatch::DayTime dayTime = m_DayTimeWatch.watch(currentTime);
-
-                switch(m_LightingMode)
-                {
-                case DEMO:
+                    if(m_controllerMode == MANUAL)
                     {
-                        UpdateDemo();
+                        Serial.println("Manual program active.");
+                        break;
                     }
-                    break;
-                case NIGHT:
+
+                    bool startSunrise = false;
+
+                    m_bAllowWeatherChange = false;
+
+                    m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
+
+                    if(!m_bSleepModeRequested)
                     {
-                        bool startSunrise = false;
-
-                        m_bAllowWeatherChange = false;
-
-                        m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
-
-                        if(!m_bSleepModeRequested)
-                        {
-                            Serial.println("requesting sleep mode...");
-                            m_pCommunicator->RequestSleepMode();
-                            m_bSleepModeRequested = true;
-                        }
-                        if(!m_bRemoteDataRequested && m_Timer.GetHour() == m_DayTimeWatch.GetSunriseHour() - 1)
-                        {
-                            // enable data receive...
-
-                            Serial.println("requesting remote lighting data...");
-                            m_pCommunicator->RequestRemoteConnection();
-                            m_bRemoteDataRequested = true;
-
-                        }
-
-
-                        switch(dayTime)
-                        {
-                        case DayTimeWatch::DT_SUNRISE:
-                            {
-                                Serial.println("LC: DT_SUNRISE");
-
-                                m_bAllowWeatherChange = true;
-
-                                m_Timer.PrintTime();
-
-                                SetLightingMode(SUNRISE);
-
-                                m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
-
-                            }
-                            break;
-                        case DayTimeWatch::DT_SUNRISE_OT:
-                            {
-                                Serial.println("LC: DT_SUNRISE_OT");
-
-                                m_bAllowWeatherChange = true;
-
-                                m_Timer.PrintTime();
-
-                                int sunriseMinutes = SUNSET_SUNRISE_TIME / 60;
-
-                                int minutesOver = m_DayTimeWatch.getOverTime();
-
-                                if(minutesOver > sunriseMinutes)
-                                {
-                                     m_iSunSetSunRiseTime = 30; // 30 seconds
-                                }
-                                else
-                                {
-                                    m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
-                                }
-
-                                SetLightingMode(SUNRISE);
-
-                                m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
-                            }
-                            break;
-                        case DayTimeWatch::DT_DAY:
-                            {
-                                Serial.println("LC: DT_DAY");
-                                m_bAllowWeatherChange = true;
-
-                                Serial.println("LC: fast sunrise.");
-
-                                m_iSunSetSunRiseTime = 30;
-
-                                SetLightingMode(SUNRISE);
-
-                                m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
-                            }
-                            break;
-                        }
+                        Serial.println("requesting sleep mode...");
+                        m_pCommunicator->RequestSleepMode();
+                        m_bSleepModeRequested = true;
+                    }
+                    if(!m_bRemoteDataRequested && m_Timer.GetHour() == m_DayTimeWatch.GetSunriseHour() - 1)
+                    {
+                        Serial.println("requesting remote lighting data...");
+                        m_pCommunicator->RequestRemoteConnection();
+                        m_bRemoteDataRequested = true;
 
                     }
-                    break;
-                default:
+
+
+                    switch(dayTime)
                     {
-                        if(dayTime == DayTimeWatch::DT_SUNSET)
+                    case DayTimeWatch::DT_SUNRISE:
                         {
-                            Serial.println("LC: DT_SUNSET");
+                            Serial.println("LC: DT_SUNRISE");
 
-                            m_bAllowWeatherChange = false;
-                            m_bSleepModeRequested = false;
+                            m_bAllowWeatherChange = true;
 
-                            m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
-                            SetLightingMode(SUNSET);
-                            m_TargetLightingMode = NIGHT;
+                            m_Timer.PrintTime();
+
+                            SetLightingMode(SUNRISE);
+
+                            m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
+
                         }
-                        else if(dayTime == DayTimeWatch::DT_SUNSET_OT)
+                        break;
+                    case DayTimeWatch::DT_SUNRISE_OT:
                         {
-                            Serial.println("LC: DT_SUNSET_OT");
+                            Serial.println("LC: DT_SUNRISE_OT");
 
-                            m_bAllowWeatherChange = false;
-                            m_bSleepModeRequested = false;
+                            m_bAllowWeatherChange = true;
+
+                            m_Timer.PrintTime();
 
                             int sunriseMinutes = SUNSET_SUNRISE_TIME / 60;
 
@@ -676,34 +611,96 @@ void CLightController::Update()
                                 m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
                             }
 
-                            if(minutesOver > sunriseMinutes)
-                            {
+                            SetLightingMode(SUNRISE);
 
-                                 m_iSunSetSunRiseTime = 30; // 30 seconds
-                            }
-                            else
-                            {
-                                m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
-                            }
-                            SetLightingMode(SUNSET);
-                            m_TargetLightingMode = NIGHT;
+                            m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
                         }
+                        break;
+                    case DayTimeWatch::DT_DAY:
+                        {
+                            Serial.println("LC: DT_DAY");
+                            m_bAllowWeatherChange = true;
+
+                            Serial.println("LC: fast sunrise.");
+
+                            m_iSunSetSunRiseTime = 30;
+
+                            SetLightingMode(SUNRISE);
+
+                            m_TargetLightingMode = m_TargetLightingModeAfterSunrise;
+                        }
+                        break;
                     }
-                    break;
 
                 }
-                m_lLastUpdateMillis = millis();
-                //m_bDrawBuffer = true;
+                break;
+            default:
+                {
+                    if(m_controllerMode == MANUAL)
+                    {
+                        Serial.println("LC: manual mode active.");
+                        break;
+                    }
+                    if(dayTime == DayTimeWatch::DT_SUNSET)
+                    {
+                        Serial.println("LC: DT_SUNSET");
+
+                        m_bAllowWeatherChange = false;
+                        m_bSleepModeRequested = false;
+                        m_bRemoteDataRequested = false;
+
+                        m_iSunSetSunRiseTime = SUNSET_SUNRISE_TIME;
+                        SetLightingMode(SUNSET);
+                        m_TargetLightingMode = NIGHT;
+                    }
+                    else if(dayTime == DayTimeWatch::DT_SUNSET_OT)
+                    {
+                        Serial.println("LC: DT_SUNSET_OT");
+
+                        m_bAllowWeatherChange = false;
+                        m_bSleepModeRequested = false;
+                        m_bRemoteDataRequested = false;
+
+                        int sunriseMinutes = SUNSET_SUNRISE_TIME / 60;
+
+                        int minutesOver = m_DayTimeWatch.getOverTime();
+
+                        if(minutesOver > sunriseMinutes)
+                        {
+                             m_iSunSetSunRiseTime = 30; // 30 seconds
+                        }
+                        else
+                        {
+                            m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
+                        }
+
+                        if(minutesOver > sunriseMinutes)
+                        {
+
+                             m_iSunSetSunRiseTime = 30; // 30 seconds
+                        }
+                        else
+                        {
+                            m_iSunSetSunRiseTime = (sunriseMinutes - minutesOver) * 60;
+                        }
+                        SetLightingMode(SUNSET);
+                        m_TargetLightingMode = NIGHT;
+                    }
+                }
+                break;
+
             }
-            if(m_bDrawBuffer)
-            {
-                memcpy(frameBuffer, targetBuffer, FRAMEBUFFER_SIZE);
-            }
+            m_lLastUpdateMillis = millis();
+            //m_bDrawBuffer = true;
         }
         if(m_bDrawBuffer)
         {
-            DrawFrameBuffer();
+            memcpy(frameBuffer, targetBuffer, FRAMEBUFFER_SIZE);
         }
+    }
+    if(m_bDrawBuffer)
+    {
+        DrawFrameBuffer();
     }
 
     m_Timer.Update();
@@ -806,6 +803,12 @@ void CLightController::ClearFrameBuffer(bool clearTargetBuffer, float fValue)
     m_bDrawBuffer = true;
 }
 
+void CLightController::SetBluePixelBrightnes(float fBrightnessForBluePixels)
+{
+    SetPixel(targetBuffer, 1, 1, fBrightnessForBluePixels);
+    SetPixel(targetBuffer, 3, 1, fBrightnessForBluePixels);
+}
+
 void CLightController::UpdateClouds()
 {
 
@@ -835,6 +838,11 @@ void CLightController::UpdateClouds()
         float* start = targetBuffer + (copiedRows * WIDTH);
 
         memcpy(start, cloudImage1, remainingRows * WIDTH * sizeof(float));
+    }
+
+    if(m_LightingMode == MOSTLY_CLOUDS)
+    {
+        SetBluePixelBrightnes(255.0f);
     }
 
     m_ScrollY++;
@@ -900,20 +908,27 @@ void CLightController::CreateCloudImages()
     case MOSTLY_CLOUDS:
         {
             fCoarse = 1.01f;
-            fBrightness = 128.0f;
+            fBrightness = m_iMaxValueMostlyClouds;
+        }
+        break;
+    case SCATTERED_CLOUDS:
+        {
+            fCoarse = 1.04f;
+            fullSunLevel = 60;
         }
         break;
     case CLOUDS:
         {
-            fCoarse = 1.01f;
-             fBrightness = 200.0f;
+             fCoarse = 1.04f;
+             fullSunLevel = 20;
+             fBrightness = m_iMaxValueClouds;
              fullSunLevel = 4;
         }
         break;
     case PARTLY_CLOUDY:
         {
             fCoarse = 1.05f;
-            fullSunLevel = 40;
+            fullSunLevel = m_iMaxFullSunCellsPercent;
         }
         break;
     }
@@ -1157,6 +1172,22 @@ float CLightController::GetValue(int value)
             return m_DayTimeWatch.GetSunsetMinute();
         }
         break;
+    case MAX_VALUE_MOSTLY_CLOUDS:
+        {
+            return m_iMaxValueMostlyClouds;
+        }
+        break;
+    case MAX_VALUE_CLOUDY:
+        {
+
+            return m_iMaxValueClouds;
+        }
+        break;
+    case MAX_VALUE_FULLSUNCELLS:
+        {
+            return m_iMaxFullSunCellsPercent;
+        }
+        break;
     default:
         {
             Serial.print("LC: gv unknown value: ");
@@ -1184,7 +1215,7 @@ void CLightController::SetValue(int value, float fValue)
         break;
     case LIGHTINGMODE:
         {
-            if(m_controllerMode == STANDALONE)
+            if(m_controllerMode == AUTOMATIC)
             {
                 if(m_LightingMode == NIGHT || m_LightingMode == SUNRISE && m_bAllowWeatherChange)
                 {
@@ -1193,7 +1224,7 @@ void CLightController::SetValue(int value, float fValue)
                 }
                 else if(m_LightingMode == SUNSET)
                 {
-                    Serial.println("new lighting mode ignored, because sunset.");
+                    Serial.println("LC: no lighting mode change: sunset.");
                     return;
                 }
             }
@@ -1205,7 +1236,7 @@ void CLightController::SetValue(int value, float fValue)
     case TARGETLIGHTINGMODEAFTERSUNRISE:
         {
             m_TargetLightingModeAfterSunrise = (LightingMode)fValue;
-            Serial.print("TLM after sunrise set: ");
+            Serial.print("LC: TLM after sunrise set: ");
             Serial.println(m_TargetLightingModeAfterSunrise);
 
             if(m_LightingMode == SUNRISE)
@@ -1240,7 +1271,7 @@ void CLightController::SetValue(int value, float fValue)
         break;
     case CLOUD_SPEED:
         {
-            if(m_controllerMode == STANDALONE && !m_bAllowWeatherChange)
+            if(m_controllerMode == AUTOMATIC && !m_bAllowWeatherChange)
             {
                 Serial.println("LC: weather change disabled.");
                 return;
@@ -1285,16 +1316,37 @@ void CLightController::SetValue(int value, float fValue)
             }
         }
         break;
-        case CLOUD_IMAGE_OCTAVES:
+/*    case CLOUD_IMAGE_OCTAVES:
         {
             m_iCloudOctaves = (byte)fValue;
             Serial.print("LC: cloud octaves: ");
             Serial.println(m_iCloudOctaves);
         }
+        break;*/
+    case MAX_VALUE_MOSTLY_CLOUDS:
+        {
+            m_iMaxValueMostlyClouds = (byte)fValue;
+            Serial.print("LC: max bright mostly clouds: ");
+            Serial.println(m_iMaxValueMostlyClouds);
+        }
+        break;
+    case MAX_VALUE_CLOUDY:
+        {
+            m_iMaxValueClouds = (byte)fValue;
+            Serial.print("LC: max bright clouds: ");
+            Serial.println(m_iMaxValueClouds);
+        }
+        break;
+    case MAX_VALUE_FULLSUNCELLS:
+        {
+            m_iMaxFullSunCellsPercent = (byte)fValue;
+            Serial.print("LC: max full sun: ");
+            Serial.println(m_iMaxFullSunCellsPercent);
+        }
         break;
     case CREATE_NEW_CLOUD_IMAGE:
         {
-            if(m_controllerMode == STANDALONE && !m_bAllowWeatherChange)
+            if(m_controllerMode == AUTOMATIC && !m_bAllowWeatherChange)
             {
                 Serial.println("LC: weather change disabled.");
                 return;
@@ -1307,16 +1359,16 @@ void CLightController::SetValue(int value, float fValue)
             byte connect = (byte)fValue;
             if(connect)
             {
-                Serial.println("master connected.");
+                Serial.println("LC: mode: MANUAL");
                 m_TargetLightingMode = NIGHT;
                 SetLightingMode(NIGHT);
                 m_bAllowWeatherChange = true;
-                m_controllerMode = REMOTE_CONTROLLED;
+                m_controllerMode = MANUAL;
             }
             else
             {
-                Serial.println("master disconnected.");
-                m_controllerMode = STANDALONE;
+                Serial.println("LC: mode: AUTOMATIC");
+                m_controllerMode = AUTOMATIC;
             }
         }
         break;

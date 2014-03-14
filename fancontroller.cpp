@@ -125,7 +125,7 @@ void CFanController::OnUpdate()
             int speed = 0;
             bool changeSpeed = false;
 
-            if(fTemp < 26.0f)
+            if(fTemp < 29.0f)
             {
                 speed = 0;
                 changeSpeed = true;
@@ -141,7 +141,12 @@ void CFanController::OnUpdate()
                 speed = 50;
                 changeSpeed = true;
             }
-            if(fTemp > 40)
+            if(fTemp > 40.0f && fTemp <= 45.0f)
+            {
+                speed = 75;
+                changeSpeed = true;
+            }
+            if(fTemp > 45.0f)
             {
                 speed = 100;
                 changeSpeed = true;

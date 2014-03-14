@@ -64,8 +64,8 @@ void CTimer::Setup()
   }
 
   Serial.println("Thank you.");
-
 */
+
   m_lPreviousMillis = millis();
   m_lPreviousSecondUpdateMillis = millis();
   Serial.println("Timer: set up.");
